@@ -1,10 +1,10 @@
 import processing.serial.*;
 
 static final int DATA_LEN = 256;
-static final int BAUD = 9600;
+static final int BAUD = 19200;
 
-static final int LOWER_DATA_RANGE = -128;
-static final int UPPER_DATA_RANGE = 128;
+static final int LOWER_DATA_RANGE = 0;
+static final int UPPER_DATA_RANGE = 1024;
 
 static final int WINDOW_WIDTH = 800;
 static final int WINDOW_HEIGHT = 400;
