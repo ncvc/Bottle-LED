@@ -5,7 +5,7 @@
 #define L_INPUT_PIN 2
 #define BAUD 19200
 
-#define NUM_LEDS 4
+#define NUM_LEDS 10
 #define NUM_COLORS 3    // number of colors per LED
 #define NUM_SHIFT_REGISTERS 4
 #define NUM_REGISTER_PINS NUM_SHIFT_REGISTERS * 8
@@ -61,19 +61,34 @@ void processData() {
   // Set the leds array to the correct values to reflect the data array
   clearLEDs();
   
+  useThresholds();
+  //useDeltas();
+  
+  setLEDs();
+}
+
+void useDeltas() {
+  int delta = lData[0] - lData[1];
+  int count = -512;
+  int bucketSize = 512 / (NUM_LEDS * 3);
+  
+  for(int ledNum = 0; ledNum < NUM_LEDS; ledNum++) {
+    count += bucketSize;
+  }
+}
+
+void useThresholds() {
   int threshold=0;
   int thresholdSize = getMax(rawData, MAX_PAST_SAMPLES) / NUM_LEDS;
   
   for(int ledNum = 0; ledNum < NUM_LEDS; ledNum++) {
     threshold += thresholdSize;
-    for (int i = 0; i < 1; i++) {
+    for (int i = 0; i < 2; i++) {
       if(lData[0] > threshold) {
         leds[ledNum][i] = HIGH;
       }
     }
   }
-  
-  setLEDs();
 }
 
 // Sets all registers to the appropriate value using the leds array
