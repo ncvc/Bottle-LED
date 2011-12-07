@@ -1,3 +1,5 @@
+#include <TimerOne>
+
 #define SER_PIN 5
 #define RCLK_PIN 6
 #define SRCLK_PIN 7
