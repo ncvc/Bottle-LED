@@ -1,4 +1,4 @@
-#include <TimerOne>
+#include "TimerOne.h"
 
 #define SER_PIN 5
 #define RCLK_PIN 6
@@ -17,14 +17,24 @@
 
 #define MAX_PAST_SAMPLES 10    // Number of past samples to find the max over
 
+#define TIMER_WINDOW 64
+#define TIMER_BIT_RESOLUTION 8
+
 boolean registers[NUM_REGISTER_PINS];
 
-boolean leds[NUM_LEDS][NUM_COLORS];    // Array of (led number) x (r, g, b)
+byte leds[2][NUM_LEDS][NUM_COLORS];    // Array of (led number) x (r, g, b)
+                                       // Note: There are two copies of the data - one to write to, and one to read from to eliminate race conditions
 
 float rData[DATA_LEN] = {0};
 float lData[DATA_LEN] = {0};
 
 int rawData[RAW_DATA_LEN] = {0};
+
+int timerCurrentFrame = TIMER_BIT_RESOLUTION;
+
+byte fade = 0;
+
+// - Arduino -
 
 void setup() {
   pinMode(L_INPUT_PIN, INPUT);
@@ -35,13 +45,16 @@ void setup() {
   
   analogReference(INTERNAL);
 
-  clearLEDs();
+  clearLEDs(true);
   
   // Reset all register pins
   clearRegisters();
   writeRegisters();
   
   Serial.begin(BAUD);
+  
+  Timer1.initialize();
+  Timer1.attachInterrupt(modifiedBAM);
 }
 
 void loop() {
@@ -52,10 +65,13 @@ void loop() {
   pushFloat(rData, .95 * rData[0] + .05 * rightInput, DATA_LEN);
   
   pushInt(rawData, leftInput, RAW_DATA_LEN);
-  Serial.println(leftInput);
+  //Serial.println(leftInput);
   
   processData();
 }
+
+
+// - Data Analysis -
 
 void processData() {
   //sendDataOverSerial();
@@ -63,10 +79,19 @@ void processData() {
   // Set the leds array to the correct values to reflect the data array
   clearLEDs();
   
-  useThresholds();
-  //useDeltas();
+  fade++;
+  if (fade > pow(2, TIMER_BIT_RESOLUTION)) {
+    fade = 0;
+  }
   
-  setLEDs();
+  for (int i=0; i < NUM_LEDS; i++) {
+    leds[0][i][2] = fade;
+  }
+  delay(1000);
+  Serial.println(fade);
+  
+  //useThresholds();
+  //useDeltas();
 }
 
 void useDeltas() {
@@ -87,21 +112,35 @@ void useThresholds() {
     threshold += thresholdSize;
     for (int i = 0; i < 2; i++) {
       if(lData[0] > threshold) {
-        leds[ledNum][i] = HIGH;
+        leds[0][ledNum][i] = HIGH;
       }
     }
   }
 }
 
+
+// - LED Control -
+
 // Sets all registers to the appropriate value using the leds array
 void setLEDs() {
-  int val;
+  byte shade;
   int registerNum;
+  int ledOffset;
+  int val;
   
   for(int ledNum=0; ledNum < NUM_LEDS; ledNum++) {
+    ledOffset = ledNum * NUM_COLORS;
     for(int i=0; i < NUM_COLORS; i++) {
-      registerNum = ledNum * 3 + i;
-      val = leds[ledNum][i];
+      shade = leds[1][ledNum][i];
+      
+      // if the current frame's bit is one in shade, turn on the LED, otherwise turn it off
+      if ((shade >> timerCurrentFrame) & 1) {
+        val = HIGH;
+      } else {
+        val = LOW;
+      }
+      
+      registerNum = ledOffset + i;
       setRegister(registerNum, val);
     }
   }
@@ -109,22 +148,60 @@ void setLEDs() {
   writeRegisters();
 }
 
-void sendDataOverSerial() {
-  for (int i = 0; i < RAW_DATA_LEN; i++) {
-    Serial.print((int) rawData[i]);
-    Serial.print(',');
-  }
-  Serial.println();
-}
-
 // Set all LEDs to off
-void clearLEDs() {  
+// all - indicates whether to reset the entire array or just the writable portion
+void clearLEDs(boolean all) {
   for(int i=0; i < NUM_LEDS; i++) {
-    for(int j=0; j < 3; j++) {
-      leds[i][j] = LOW;
+    for(int j=0; j < NUM_COLORS; j++) {
+      leds[0][i][j] = 0;
+    }
+  }
+  
+  if (all) {
+    for(int i=0; i < NUM_LEDS; i++) {
+      for(int j=0; j < NUM_COLORS; j++) {
+        leds[1][i][j] = 0;
+      }
     }
   }
 }
+
+void clearLEDs() {
+  clearLEDs(false);
+}
+
+// Uses a modified version of Bit Angle Modulation that is not susceptable to the race conditions that standard BAM is.
+void modifiedBAM() {
+  // Stop the timer to wait for the LED updates to finish
+  Timer1.stop();
+  
+  // Update the current frame, and update the LED buffer if necessary
+  timerCurrentFrame--;
+  if (timerCurrentFrame == -1) {
+    timerCurrentFrame = TIMER_BIT_RESOLUTION-1;
+    updateLEDBuffer();
+  }
+  Serial.println('lol');
+  // Turn LEDs on and off accordingly
+  setLEDs();
+  
+  // Restart the timer
+  Timer1.attachInterrupt(modifiedBAM, pow(2, timerCurrentFrame) * TIMER_WINDOW);
+  Timer1.restart();
+  Timer1.start();
+}
+
+// Copies contents of the writable portion of leds to the read-only portion
+void updateLEDBuffer() {
+  for(int i=0; i < NUM_LEDS; i++) {
+    for(int j=0; j < NUM_COLORS; j++) {
+      leds[1][i][j] = leds[0][i][j];
+    }
+  }
+}
+
+
+// - Register Control -
 
 // Set all register pins to LOW
 void clearRegisters(){
@@ -155,6 +232,9 @@ void setRegister(int index, int value){
   registers[index] = value;
 }
 
+
+// - Utility -
+
 // Push item (int) onto the front of the array
 void pushInt(int array[], int item, int arrayLen) {
   for (int i=arrayLen-1; i > 0; i--) {
@@ -182,4 +262,12 @@ int getMax(int array[], int arrayLen) {
   }
   
   return maxNum;
+}
+
+void sendDataOverSerial() {
+  for (int i = 0; i < RAW_DATA_LEN; i++) {
+    Serial.print((int) rawData[i]);
+    Serial.print(',');
+  }
+  Serial.println();
 }
