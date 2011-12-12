@@ -17,8 +17,8 @@
 
 #define MAX_PAST_SAMPLES 10    // Number of past samples to find the max over
 
-#define TIMER_WINDOW 64
-#define TIMER_BIT_RESOLUTION 8
+#define TIMER_WINDOW 640
+#define TIMER_BIT_RESOLUTION 4
 
 boolean registers[NUM_REGISTER_PINS];
 
@@ -31,6 +31,7 @@ float lData[DATA_LEN] = {0};
 int rawData[RAW_DATA_LEN] = {0};
 
 int timerCurrentFrame = TIMER_BIT_RESOLUTION;
+int timerStep = -1;
 
 byte fade = 0;
 
@@ -52,8 +53,9 @@ void setup() {
   writeRegisters();
   
   Serial.begin(BAUD);
+  Serial.println("lolsadfsda");
   
-  Timer1.initialize();
+  Timer1.initialize(TIMER_WINDOW);
   Timer1.attachInterrupt(modifiedBAM);
 }
 
@@ -65,7 +67,6 @@ void loop() {
   pushFloat(rData, .95 * rData[0] + .05 * rightInput, DATA_LEN);
   
   pushInt(rawData, leftInput, RAW_DATA_LEN);
-  //Serial.println(leftInput);
   
   processData();
 }
@@ -74,21 +75,24 @@ void loop() {
 // - Data Analysis -
 
 void processData() {
+  //Serial.println("processData");
   //sendDataOverSerial();
   
   // Set the leds array to the correct values to reflect the data array
   clearLEDs();
   
   fade++;
-  if (fade > pow(2, TIMER_BIT_RESOLUTION)) {
+  if (fade >= pow(2, TIMER_BIT_RESOLUTION)) {
     fade = 0;
   }
   
   for (int i=0; i < NUM_LEDS; i++) {
     leds[0][i][2] = fade;
   }
-  delay(1000);
+  
+  Serial.print("fade: ");
   Serial.println(fade);
+  delay(1000);
   
   //useThresholds();
   //useDeltas();
@@ -134,7 +138,7 @@ void setLEDs() {
       shade = leds[1][ledNum][i];
       
       // if the current frame's bit is one in shade, turn on the LED, otherwise turn it off
-      if ((shade >> timerCurrentFrame) & 1) {
+      if ((shade >> timerCurrentFrame-1) & 1) {
         val = HIGH;
       } else {
         val = LOW;
@@ -146,6 +150,34 @@ void setLEDs() {
   }
   
   writeRegisters();
+}
+
+// Uses a modified version of Bit Angle Modulation (essentially double buffering) that is not susceptable to the race conditions that standard BAM is.
+// TODO: Fix the blink when transitioning from pow(2, TIMER_BIT_RESOLUTION-1) to pow(2, TIMER_BIT_RESOLUTION-1)+1
+void modifiedBAM() {
+  // Update the current frame, and update the LED buffer if necessary
+  timerStep++;
+  
+  if (timerStep >= pow(2, timerCurrentFrame-1)) {
+    timerCurrentFrame--;
+    timerStep = -1;
+    if (timerCurrentFrame == 0) {
+      timerCurrentFrame = TIMER_BIT_RESOLUTION;
+      updateLEDBuffer();
+    }
+    
+    // Turn LEDs on and off accordingly
+    setLEDs();
+  }
+}
+
+// Copies contents of the writable portion of leds to the read-only portion
+void updateLEDBuffer() {
+  for(int i=0; i < NUM_LEDS; i++) {
+    for(int j=0; j < NUM_COLORS; j++) {
+      leds[1][i][j] = leds[0][i][j];
+    }
+  }
 }
 
 // Set all LEDs to off
@@ -168,36 +200,6 @@ void clearLEDs(boolean all) {
 
 void clearLEDs() {
   clearLEDs(false);
-}
-
-// Uses a modified version of Bit Angle Modulation that is not susceptable to the race conditions that standard BAM is.
-void modifiedBAM() {
-  // Stop the timer to wait for the LED updates to finish
-  Timer1.stop();
-  
-  // Update the current frame, and update the LED buffer if necessary
-  timerCurrentFrame--;
-  if (timerCurrentFrame == -1) {
-    timerCurrentFrame = TIMER_BIT_RESOLUTION-1;
-    updateLEDBuffer();
-  }
-  Serial.println('lol');
-  // Turn LEDs on and off accordingly
-  setLEDs();
-  
-  // Restart the timer
-  Timer1.attachInterrupt(modifiedBAM, pow(2, timerCurrentFrame) * TIMER_WINDOW);
-  Timer1.restart();
-  Timer1.start();
-}
-
-// Copies contents of the writable portion of leds to the read-only portion
-void updateLEDBuffer() {
-  for(int i=0; i < NUM_LEDS; i++) {
-    for(int j=0; j < NUM_COLORS; j++) {
-      leds[1][i][j] = leds[0][i][j];
-    }
-  }
 }
 
 
