@@ -1,1 +1,7 @@
+A hacked-together script for Arduino to visualize music on a series of LEDs. Uses the Shifty VU Shield (http://docs.macetech.com/doku.php/shifty_vu_shield) to grab input from a headphone jack.
+
+Folders:
+Arduino/	all Arduino code
+SerialGraph/	a processing sketch to visualize input to the Arduino
+
 Note: Uses the Timer1 library, which can be found here: http://www.arduino.cc/playground/Code/Timer1
